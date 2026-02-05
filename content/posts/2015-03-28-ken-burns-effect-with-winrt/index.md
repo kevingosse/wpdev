@@ -204,7 +204,7 @@ private void OnImageOpened(object sender, RoutedEventArgs e)
 
 At this point, we have a working animation:
 
-\[video width="840" height="944" mp4="http://blog.wpdev.fr/wp-content/uploads/2015/03/ScreenCapture\_3-27-2015\_7.mp4"\]\[/video\]
+![Animation demo](images/ScreenCapture_3-27-2015_7.mp4)
 
 ## **Automatic height**
 
