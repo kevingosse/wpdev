@@ -32,7 +32,12 @@ Indeed, according to the signature, the “item.Properties.ObjectForKey” metho
 
 Basically:
 
-<script src="https://gist.github.com/kevingosse/0c77fbacf48c6aeeb489.js"></script>
+```csharp
+long l = 0L;
+object obj = (object)l;
+int a = (int)obj; // Invalid
+int a = (int)(long)obj; // Valid
+```
 
 That’s an easy-to-make mistake, so I’m not really surprised it wasn’t detected in the released product.
 

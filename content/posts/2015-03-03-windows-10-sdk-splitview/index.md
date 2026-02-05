@@ -16,13 +16,34 @@ It's quite straightforward to use. The "_Pane_" property contains the code of th
 
 Wrapping it up, we get this simple implementation (also using the _RelativePanel_ shown in the previous post). I chose to use a thin clickable vertical bar on the left side rather than a button, to show the menu:
 
-<script src="https://gist.github.com/kevingosse/f984536840a2f2b13f16.js"></script>
+```xml
+<Page xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <RelativePanel>
+        <Rectangle x:Name="CollapsedMenu" Fill="Salmon" Width="20" RelativePanel.AlignLeftWithPanel="True" RelativePanel.AlignTopWithPanel="True" RelativePanel.AlignBottomWithPanel="True" Tapped="CollapsedMenu_Tapped" />
+        <SplitView x:Name="SplitView" OpenPaneLength="100" RelativePanel.RightOf="CollapsedMenu" RelativePanel.AlignTopWithPanel="True" RelativePanel.AlignBottomWithPanel="True" RelativePanel.AlignRightWithPanel="True" PanePlacement="Left">
+            <SplitView.Pane>
+                <Grid Background="Salmon">
+                    <TextBlock>SplitView pane</TextBlock>
+                </Grid>
+            </SplitView.Pane>
+            <Grid Background="LightBlue">
+                <TextBlock>Regular content</TextBlock>
+            </Grid>
+        </SplitView>
+    </RelativePanel>
+</Page>
+```
 
  
 
 In the code-behind, we react to the "Tapped" event to show/collapse the menu:
 
-<script src="https://gist.github.com/kevingosse/4c25c002abf01c473c83.js"></script>
+```csharp
+private void CollapsedMenu_Tapped(object sender, TappedRoutedEventArgs e)
+{
+    this.SplitView.IsPaneOpen = !this.SplitView.IsPaneOpen;
+}
+```
 
 Launching the app, we get this simple layout which demonstrates my prowess as designer:
 

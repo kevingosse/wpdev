@@ -16,7 +16,24 @@ tags:
 
 There’s a memory leak that has been bothering me for a while in my Imageboard Browser app. The scenario is simple: a slideshow feature, where a new picture is loaded from an url every few seconds. After a while, the app crashes with an OutOfMemory exception. I’ve never been able to find the source of the leak, so I settled for a dirty workaround consisting in loading a fake picture in the BitmapImage instance to force it to release the memory:
 
-<script src="https://gist.github.com/kevingosse/7006771f65d2ece3675f.js"></script>
+```csharp
+private void DisposeImage(BitmapImage image)
+{
+    if (image != null)
+    {
+        try
+        {
+            using (var ms = new MemoryStream(new byte[] { 0x0 }))
+            {
+                image.SetSource(ms);
+            }
+        }
+        catch (Exception)
+        {
+        }
+    }
+}
+```
 
 It fixed the issue, but I didn’t dig much further. However, over the last few weeks I’ve seen many similar leaks reported on StackOverflow, so I’ve finally decided to get to the bottom of the problem.
 
@@ -26,7 +43,51 @@ To diagnose a memory issue, the first thing to do is to have a repro case. It mu
 
 First, I needed a list of pictures. I browsed the Internet a bit, found a wallpaper website with predictable urls, and set up a small program:
 
-<script src="https://gist.github.com/kevingosse/a95b02a9af51b2c33bbc.js"></script>
+```csharp
+public partial class MainPage : PhoneApplicationPage
+{
+    private int CurrentIndex = 100;
+
+    public MainPage()
+    {
+        InitializeComponent();
+    }
+
+    protected override void OnNavigatedTo(System.Windows.Navigation.NavigationEventArgs e)
+    {
+        this.LoadNextPicture();
+    }
+
+    private void LoadNextPicture()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        Debug.WriteLine(Microsoft.Phone.Info.DeviceStatus.ApplicationCurrentMemoryUsage);
+
+        Thread.Sleep(TimeSpan.FromSeconds(5));
+
+        var bitmap = new BitmapImage();
+
+        bitmap.ImageOpened += bitmap_ImageOpened;
+        bitmap.ImageFailed += bitmap_ImageFailed;
+
+        bitmap.UriSource = new Uri(string.Format("http://www.maximumwallhd.com/fonds-ecran/3d/abstrait/fond-ecran-3d-abstrait-{0}.jpg", this.CurrentIndex++), UriKind.Absolute);
+
+        this.MainImage.Source = bitmap;
+    }
+
+    void bitmap_ImageFailed(object sender, ExceptionRoutedEventArgs e)
+    {
+        Debug.WriteLine(e.ErrorException.Message);
+        this.LoadNextPicture();
+    }
+
+    void bitmap_ImageOpened(object sender, RoutedEventArgs e)
+    {
+        this.LoadNextPicture();
+    }
+}
+```
 
 Basically, it calls the garbage collector, display the total memory usage, wait a while (to avoid triggering any anti-leech protection from the website), load the picture, then back to step one. The XAML part just contains an Image control called “MainImage”.
 
@@ -56,7 +117,17 @@ After a bit of trial and error, I found something that I really wasn’t expecti
 
 By simply changing the ImageOpened method to this:
 
-<script src="https://gist.github.com/kevingosse/915b7f3948ee9660ae1a.js"></script>
+```csharp
+void bitmap_ImageOpened(object sender, RoutedEventArgs e)
+{
+    var bitmap = (BitmapImage)sender;
+
+    bitmap.ImageOpened -= bitmap_ImageOpened;
+    bitmap.ImageFailed -= bitmap_ImageFailed;
+
+    this.LoadNextPicture();
+}
+```
 
 The memory usage is higher than when using the workaround so I let the test run longer, but it looks stable:
 
@@ -80,11 +151,42 @@ Is that our problem here? No, because we’re assigning a method of our page to 
 
 Just to make sure, I reverted to the leaky version of the program, and created the described “ChildObject” class. It implements a finalizer, to know when it’s freed by the garbage collector, and an empty Bitmap\_ImageOpened method:
 
-<script src="https://gist.github.com/kevingosse/d5c3006356977d23ad04.js"></script>
+```csharp
+public class ChildObject
+{
+    ~ChildObject()
+    {
+        Debug.WriteLine("Finalizer");
+    }
+
+    public void Bitmap_ImageOpened(object sender, RoutedEventArgs e)
+    {
+    }
+}
+```
 
 Then, I assign this “Bitmap\_ImageOpened” method to the ImageOpened handler of the BitmapImage. Our LoadNextPicture method is now:
 
-<script src="https://gist.github.com/kevingosse/701a2a37b019735f44c6.js"></script>
+```csharp
+private void LoadNextPicture()
+{
+    GC.Collect();
+    GC.WaitForPendingFinalizers();
+    Debug.WriteLine(Microsoft.Phone.Info.DeviceStatus.ApplicationCurrentMemoryUsage);
+
+    Thread.Sleep(TimeSpan.FromSeconds(5));
+
+    var child = new ChildObject();
+
+    var bitmap = new BitmapImage();
+
+    bitmap.ImageOpened += child.Bitmap_ImageOpened;
+
+    bitmap.UriSource = new Uri(string.Format("http://www.maximumwallhd.com/fonds-ecran/3d/abstrait/fond-ecran-3d-abstrait-{0}.jpg", this.CurrentIndex++), UriKind.Absolute);
+
+    this.MainImage.Source = bitmap;
+}
+```
 
 When executing the application, the console shows:
 
@@ -164,15 +266,59 @@ We know the leak is centered around the event handler, so we can directly go and
 
 Nothing interesting in the code of the ImageOpened event:
 
-<script src="https://gist.github.com/kevingosse/9718a8dab2012d23eabe.js"></script>
+```csharp
+public event EventHandler<RoutedEventArgs> ImageOpened
+{
+    add
+    {
+        base.AddEventListener(DependencyProperty.RegisterCoreProperty(0x659e, null), value);
+    }
+    remove
+    {
+        base.RemoveEventListener(DependencyProperty.RegisterCoreProperty(0x659e, null), value);
+    }
+}
+```
 
 Removing the event handler fixes the leak, so let’s see what is in this “RemoveEventListener” method.
 
-<script src="https://gist.github.com/kevingosse/19b9e5ce2f0ddf3b771c.js"></script>
+```csharp
+internal void RemoveEventListener(DependencyProperty property, Delegate handler)
+{
+    this._coreTypeEventHelper.RemoveEventListener(this, property, handler);
+}
+```
 
 Meh, just a wrapper. Let’s see the \_coreTypeEventHelper.RemoveEventListener method:
 
-<script src="https://gist.github.com/kevingosse/e5ace9a3ed129f22c505.js"></script>
+```csharp
+internal void RemoveEventListener(IManagedPeerBase obj, DependencyProperty property, Delegate handler)
+{
+    foreach (KeyValuePair<int, EventAndDelegate> pair in this.EventAndDelegateTable)
+    {
+        if (pair.Value.Handler == handler)
+        {
+            CoreDependencyProperty property2 = pair.Value.Property as CoreDependencyProperty;
+            if ((property2 != null) && (property is CoreDependencyProperty))
+            {
+                CoreDependencyProperty property3 = property as CoreDependencyProperty;
+                if ((property2.m_nKnownId != property3.m_nKnownId) && !SkipEventComparisonDuringRemoveEventListener())
+                {
+                    continue;
+                }
+            }
+            else if (pair.Value.Property != property)
+            {
+                continue;
+            }
+            string eventName = "M@" + pair.Key.ToString();
+            XcpImports.RemoveEventListener(obj, property, eventName);
+            this.EventAndDelegateTable.Remove(pair.Key);
+            break;
+        }
+    }
+}
+```
 
 The method checks a few things, then calls the XcpImports.RemoveEventListener method, and finally removes something from the “EventAndDelegateTable” dictionary. Now that’s interesting, maybe the memory is used by the dictionary?
 
@@ -180,17 +326,37 @@ The dictionary stores instances of an internal class called “EventAndDelegate�
 
 Then maybe the XcpImports.RemoveEventListener method?
 
-<script src="https://gist.github.com/kevingosse/020c61cc936a9e8231ba.js"></script>
+```csharp
+[SecuritySafeCritical]
+internal static unsafe void RemoveEventListener(IManagedPeerBase obj, DependencyProperty property, string eventName)
+{
+    CheckThread();
+    CValue outval = new CValue();
+    outval.nType = (uint) CValueType.valueString;
+    outval.m_cbData = checked((uint) eventName.Length);
+    fixed (char* str = eventName)
+    {
+        char* chPtr = str;
+        outval.m_pData = (IntPtr) chPtr;
+        CheckHResult(RemoveEventListenerNative(obj.NativeObject, property.m_nKnownId, ref outval));
+    }
+    GC.KeepAlive(obj);
+}
+```
 
 It’s getting really low-level here. But the interesting part is the line:
 
-<script src="https://gist.github.com/kevingosse/f19b7152e23627ed76d2.js"></script>
+```csharp
+CheckHResult(RemoveEventListenerNative(obj.NativeObject, property.m_nKnownId, ref outval));
+```
 
 We’re calling a method called “RemoveEventListenerNative”. As its name indicates, it’s a native method, so we can’t use Reflector to see what it’s doing. But the method receives a parameter called “obj.NativeObject”, making it a nice candidate for our leak.
 
 Stepping back and digging into the “add” part of the event, we reach a similar AddEventListener method, passing the “obj.NativeObject” parameter to a method called “AddEventListenerNative”:
 
-<script src="https://gist.github.com/kevingosse/550d44e1d7527240a4a6.js"></script>
+```csharp
+CheckHResult(AddEventListenerNative(obj.NativeObject, property.m_nKnownId, ref outval, handledEventsToo));
+```
 
 How to know whether it’s the source of the leak or not? By calling it ourselves!
 

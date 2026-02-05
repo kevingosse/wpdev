@@ -23,7 +23,19 @@ The objective is to allow the user to refresh the list when there is no element.
 
 From there, it’s pretty straightforward. I use a “IsLoading” boolean property in the ViewModel to indicate when the data is loaded. I use it along with a BooleanToVisibilityConverter (the one provided with the Telerik controls) to alternatively display the refresh button or the loading animation. Everything is wrapped in the “EmptyContent” property of the RadDataBoundListBox to be displayed only when the list is empty:
 
-<script src="https://gist.github.com/kevingosse/9916f2be07777de2d561.js"></script>
+```xml
+<telerikPrimitives:RadDataBoundListBox.EmptyContent>
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <telerikPrimitives:RadBusyIndicator AnimationStyle="AnimationStyle7" IsRunning="True" Visibility="{Binding IsLoading, Converter={StaticResource BooleanToVisibilityConverter}}" />
+        <TextBlock Grid.Column="1" Text="loading" FontFamily="{StaticResource PhoneFontFamilySemiLight}" FontSize="{StaticResource PhoneFontSizeMediumLarge}" VerticalAlignment="Center" Foreground="{StaticResource PhoneForegroundBrush}" Visibility="{Binding IsLoading, Converter={StaticResource BooleanToVisibilityConverter}}" />
+        <Button Content="Refresh" Grid.ColumnSpan="2" Click="ButtonRefreshClick" Visibility="{Binding IsLoading, Converter={StaticResource InvertedBooleanToVisibilityConverter}}" />
+    </Grid>
+</telerikPrimitives:RadDataBoundListBox.EmptyContent>
+```
 
 And that’s it! Our loading animation look identical to the pull-to-refresh one, thus avoiding the inconsistency.
 

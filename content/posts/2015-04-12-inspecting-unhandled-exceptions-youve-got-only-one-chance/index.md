@@ -14,11 +14,29 @@ That's a surprising behavior, brought to my attention by [this question of Antho
 
 We'll start by making a simple program to reproduce the issue. When the user click on a button, we throw a custom exception:
 
-<script src="https://gist.github.com/kevingosse/009383acd133d51f2440.js"></script>
+```csharp
+private void Button_Click(object sender, RoutedEventArgs e)
+{
+    throw new Exception("Test exception");
+}
+```
 
 In the App.xaml.cs file, we subscribe to the unhandled exception handler, and print twice the stacktrace of the exception: 
 
-<script src="https://gist.github.com/kevingosse/a0fc80f000374a08f8df.js"></script>
+```csharp
+public App()
+{
+    this.InitializeComponent();
+    this.Suspending += this.OnSuspending;
+    this.UnhandledException += App_UnhandledException;
+}
+
+void App_UnhandledException(object sender, UnhandledExceptionEventArgs e)
+{
+    Debug.WriteLine(e.Exception.StackTrace);
+    Debug.WriteLine(e.Exception.StackTrace);
+}
+```
 
 Sure enough, the stacktrace is printed only once. The second time, the property is null. What's going on?
 
@@ -26,11 +44,27 @@ Fiddling with the debugger a bit, I noticed that the stacktrace wasn't the only 
 
 To test this hypothesis, I started to change my test code to assign the exception to a variable before throwing it: 
 
-<script src="https://gist.github.com/kevingosse/ba2eb7ab45ccab583ca7.js"></script>
+```csharp
+private void Button_Click(object sender, RoutedEventArgs e)
+{
+    var ex = new Exception("Test exception");
+
+    throw ex;
+}
+```
 
 In the unhandled exception handler, I assign the contents of the _e.Exception_ property to two different variables, then display their message:  
 
-<script src="https://gist.github.com/kevingosse/74eafb294afc56f102f8.js"></script>
+```csharp
+void App_UnhandledException(object sender, UnhandledExceptionEventArgs e)
+{
+    var ex1 = e.Exception;
+    var ex2 = e.Exception;
+
+    Debug.WriteLine(ex1.Message);
+    Debug.WriteLine(ex2.Message);
+}
+```
 
 From there, I put a breakpoint on the line throwing the exception, add the "'ex" variable in the "Watch" panel of Visual Studio, right click, and select "Make Object ID":
 

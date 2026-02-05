@@ -17,7 +17,29 @@ After some trial and error and a bit of luck, I’ve discovered that the bug lie
 
 To confirm this, I’ve written a small application with two buttons. It’s as simple as it can get: the “download” button downloads a picture, and saves it to the picture hub. The “storage” button displays the contents of the isolated storage:
 
-<script src="https://gist.github.com/kevingosse/e9bff9ea9c74d172f070.js"></script>
+```csharp
+private void ButtonDownload_Click(object sender, RoutedEventArgs e)
+{
+    var client = new WebClient();
+    client.OpenReadCompleted += WebClient_OpenReadCompleted;
+    client.OpenReadAsync(new Uri("http://www.maximumwallhd.com/fonds-ecran/3d/abstrait/fond-ecran-3d-abstrait-100.jpg", UriKind.Absolute));
+}
+
+void WebClient_OpenReadCompleted(object sender, OpenReadCompletedEventArgs e)
+{
+    new MediaLibrary().SavePicture("1", e.Result);
+    MessageBox.Show("Done!");
+}
+
+private void ButtonStorage_Click(object sender, RoutedEventArgs e)
+{
+    using (var storage = IsolatedStorageFile.GetUserStoreForApplication())
+    {
+        var files = string.Join(Environment.NewLine, storage.GetFileNames());
+        MessageBox.Show(files);
+    }
+}
+```
 
 When running the application for the first time, the “storage” button shows that the isolated storage is empty:
 

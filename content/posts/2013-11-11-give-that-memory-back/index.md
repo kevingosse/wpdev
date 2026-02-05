@@ -13,11 +13,37 @@ A weird behavior (one more) I noticed on Windows Phone, thanks to a question on 
 
 First, let’s create a simple Windows Phone application. The first page will contain three buttons: the first one navigates to another page, the second one displays the amount of memory used (by calling Microsoft.Phone.Info.DeviceStatus.ApplicationCurrentMemoryUsage), and the last one will forcefully call the garbage collector, wait for the finalizers to execute, and collect the memory freed by those finalizers:
 
-<script src="https://gist.github.com/kevingosse/4b91c8d5baf35a6ee35c.js"></script>
+```csharp
+private void ButtonNavigate_Click(object sender, RoutedEventArgs e)
+{
+    this.NavigationService.Navigate(new Uri("/Page2.xaml", UriKind.Relative));
+}
+
+private void ButtonDisplayMemory_Click(object sender, RoutedEventArgs e)
+{
+    MessageBox.Show(Microsoft.Phone.Info.DeviceStatus.ApplicationCurrentMemoryUsage.ToString());
+}
+
+private void ButtonCollectMemory_Click(object sender, RoutedEventArgs e)
+{
+    GC.Collect();
+    GC.WaitForPendingFinalizers();
+    GC.Collect();
+}
+```
 
 In the second page, we simply create a few objects and bind them to a grid. The sole purpose is to simulate a page that would use a large amount of memory:
 
-<script src="https://gist.github.com/kevingosse/eb909765eb977b23a34f.js"></script>
+```csharp
+protected override void OnNavigatedTo(System.Windows.Navigation.NavigationEventArgs e)
+{
+    this.ListBox.ItemsSource = Enumerable.Range(0, 50).Select(i => new
+    {
+        Title = i.ToString(),
+        Payload = new byte[1024 * 512]
+    });
+}
+```
 
 Then, the test can start. Start the application, and display the amount of used memory. The tests are done with the application compiled in release mode and no debugger attached, to simulate exactly what’ll happen on a published application:
 
@@ -57,7 +83,18 @@ Trying once more. Navigating to page 2, back to page 1, and displaying the amoun
 
 Then, can we just chain the calls to the garbage collector? Let’s change the code of the collect button to simulate what happens when we tap two times on it:
 
-<script src="https://gist.github.com/kevingosse/607bf58989e89d81184f.js"></script>
+```csharp
+private void ButtonCollectMemory_Click(object sender, RoutedEventArgs e)
+{
+    GC.Collect();
+    GC.WaitForPendingFinalizers();
+    GC.Collect();
+
+    GC.Collect();
+    GC.WaitForPendingFinalizers();
+    GC.Collect();
+}
+```
 
 Compiling the app, launching it, and displaying the amount of memory: 9.6 MB. Pressing the collect button: 9.6 MB. So far, the results are consistent with the first experience. Navigating to the second page, back to the first page, and displaying the memory: 38 MB. Pressing the collect button, and displaying the memory again:
 
@@ -67,7 +104,21 @@ Still 38 MB! Collecting again, and displaying the memory: 12 MB… Why do we sti
 
 This time, we’re going to let the UI thread run between our two calls to the garbage collector:
 
-<script src="https://gist.github.com/kevingosse/b721bb904df18f875eb0.js"></script>
+```csharp
+private void ButtonCollectMemory_Click(object sender, RoutedEventArgs e)
+{
+    GC.Collect();
+    GC.WaitForPendingFinalizers();
+    GC.Collect();
+
+    this.Dispatcher.BeginInvoke(() =>
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+    });
+}
+```
 
 Then we do the test again. Initial memory: 9.6 MB. Navigating to second page and back to the first page: 38 MB. Pressing the collect button: 11.7 MB. We finally managed to free the unused memory!
 
@@ -81,6 +132,22 @@ In most situations, you shouldn’t have to worry about it. But if your applicat
 
 Oh, but it gets even better when you try to do that in the “OnNavigatedTo” event of the first page. You don’t have to call the garbage collector once, or twice, but thrice!
 
-<script src="https://gist.github.com/kevingosse/82702095e97ed939d298.js"></script>
+```csharp
+protected override void OnNavigatedTo(System.Windows.Navigation.NavigationEventArgs e)
+{
+    this.Dispatcher.BeginInvoke(() =>
+    {
+        this.Dispatcher.BeginInvoke(() =>
+        {
+            this.Dispatcher.BeginInvoke(() =>
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+            });
+        });
+    });
+}
+```
 
 And trust me, it works.

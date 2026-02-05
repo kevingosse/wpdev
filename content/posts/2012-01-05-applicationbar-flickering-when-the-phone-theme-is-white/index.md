@@ -16,11 +16,44 @@ Create a simple WP7 application with a black background and an ApplicationBar. A
 
 The XAML should look like:
 
-<script src="https://gist.github.com/kevingosse/882d8cb7d6c9147b6716.js"></script>
+```xml
+<phone:PhoneApplicationPage
+    x:Class="WP7ForumTest.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:phone="clr-namespace:Microsoft.Phone.Controls;assembly=Microsoft.Phone"
+    xmlns:shell="clr-namespace:Microsoft.Phone.Shell;assembly=Microsoft.Phone"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d" d:DesignWidth="480" d:DesignHeight="696"
+    FontFamily="{StaticResource PhoneFontFamilyNormal}"
+    FontSize="{StaticResource PhoneFontSizeNormal}"
+    Foreground="{StaticResource PhoneForegroundBrush}"
+    SupportedOrientations="Portrait" Orientation="Portrait"
+    shell:SystemTray.IsVisible="True">
+    <Grid x:Name="LayoutRoot" Background="Black">
+        <Button Content="Toggle Application Bar"
+                VerticalAlignment="Top"
+                Click="ButtonClick"
+                BorderBrush="White"
+                Foreground="White"/>
+    </Grid>
+    <phone:PhoneApplicationPage.ApplicationBar>
+        <shell:ApplicationBar BackgroundColor="Black" ForegroundColor="White">
+            <shell:ApplicationBarIconButton IconUri="/icon.png" Text="Button 1" />
+        </shell:ApplicationBar>
+    </phone:PhoneApplicationPage.ApplicationBar>
+</phone:PhoneApplicationPage>
+```
 
 And the ButtonClick method:
 
-<script src="https://gist.github.com/kevingosse/0d6d3f0047b7e2387067.js"></script>
+```csharp
+private void ButtonClick(object sender, RoutedEventArgs e)
+{
+    ApplicationBar.IsVisible = !ApplicationBar.IsVisible;
+}
+```
 
 Now launch the WP7 emulator, go in the settings, and set the phone theme to ‘light’. Then start the application, and try pressing the button: the application bar disappears as expected, but you may notice a quick white flickering. The same occurs when showing back the bar.
 
@@ -30,6 +63,14 @@ So, what’s happening? Unfortunately, the ApplicationBar control is unmanaged, 
 
 How to fix it? We have to find a way to force WP7 to paint the grid’s background under the ApplicationBar. For this, we have just the property we need: Opacity. Just set the opacity of the bar to 0.99: the value is so high that the transparency effect will be invisible, but the runtime will have to draw the background.
 
-<script src="https://gist.github.com/kevingosse/644b9b608e47465a5828.js"></script>
+```xml
+<phone:PhoneApplicationPage.ApplicationBar>
+    <shell:ApplicationBar BackgroundColor="Black"
+                          ForegroundColor="White"
+                          Opacity=".99">
+        <shell:ApplicationBarIconButton IconUri="/icon.png" Text="Button 1" />
+    </shell:ApplicationBar>
+</phone:PhoneApplicationPage.ApplicationBar>
+```
 
 Compile, run, and the flickering effect should be gone.

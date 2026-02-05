@@ -22,19 +22,54 @@ Currently, only one type of StateTrigger is available: the AdaptiveTrigger. So f
 
 How does the AdaptiveTrigger work? It reminds me a lot of CSS media queries. Basically, it allows the developer to set a minimal height and width. When the window gets bigger than the given size, the visual state is activated. Minimum height and width are set respectively through the _MinWindowHeight_ and _MinWindowWidth_ properties. For instance:
 
-<script src="https://gist.github.com/kevingosse/2314d098c2524d040cb5.js"></script>
+```xml
+<VisualStateManager.VisualStateGroups>
+     <VisualStateGroup>
+         <VisualState x:Name="WideState">
+             <VisualState.StateTriggers>
+                 <AdaptiveTrigger MinWindowWidth="600" />
+             </VisualState.StateTriggers>
+        </VisualState>
+     </VisualStateGroup>
+</VisualStateManager.VisualStateGroups>
+```
 
 In this case, the visual state will automatically get activated if the window width gets above 600 pixels.
 
 But even if switching the visual state gets easier, the hassle of setting the properties through storyboards remains. That's why setters are being introduced. They allow you, if animation isn't needed, to describe property changes in a simple and concise way.
 
-<script src="https://gist.github.com/kevingosse/309bbe2e3b2e1ab9d068.js"></script>
+```xml
+<VisualState.Setters>
+    <Setter Target="MainGrid.Background" Value="Green" />
+</VisualState.Setters>
+```
 
 This setter sets the background of the control named "MainGrid" to green.
 
 Wrapping it up, we can make complete visual states with just a few lines of code:
 
-<script src="https://gist.github.com/kevingosse/dd6db20a8e272bbea08b.js"></script>
+```xml
+<VisualStateManager.VisualStateGroups>
+     <VisualStateGroup>
+         <VisualState x:Name="WideState">
+             <VisualState.StateTriggers>
+                 <AdaptiveTrigger MinWindowWidth="600" />
+             </VisualState.StateTriggers>
+             <VisualState.Setters>
+                 <Setter Target="MainGrid.Background" Value="Green" />
+             </VisualState.Setters>
+        </VisualState>
+        <VisualState x:Name="NarrowState">
+             <VisualState.StateTriggers>
+                 <AdaptiveTrigger MinWindowWidth="0" />
+             </VisualState.StateTriggers>
+             <VisualState.Setters>
+                 <Setter Target="MainGrid.Background" Value="Red" />
+             </VisualState.Setters>
+        </VisualState>
+     </VisualStateGroup>
+</VisualStateManager.VisualStateGroups>
+```
 
 In thise case, the targeted grid will have a green background when the window width is greater than 600 pixels, and automatically switch to red when it gets narrower.
 
@@ -42,7 +77,12 @@ In thise case, the targeted grid will have a green background when the window wi
 
 The other major addition to the Windows 10 SDK is the RelativePanel. The purpose is to provide a container specially thought for responsive design. In this panel, the controls are positioned based on a relationship to each other. For instance:
 
-<script src="https://gist.github.com/kevingosse/3142ce12cd2683e571be.js"></script>
+```xml
+<RelativePanel>
+    <Button Content="Button 1" x:Name="B1" RelativePanel.AlightHorizontalCenterWithPanel="True" />
+    <Button Content="Button 2" RelativePanel.LeftOf="{Binding ElementName=B1}" />
+</RelativePanel>
+```
 
 In this example, the first button is centered horizontally on the panel. The second button is positioned at the left of the first button. While the benefits of this kind of layout don't seem obvious at first, it makes a lot of sense when combined with the visual state triggers. They allow to easily change the value of properties, and therefore the relationship between each control. From there, you can easily toggle from a left-to-right layout to a top-to-bottom, depending on the size of the window.
 

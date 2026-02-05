@@ -23,7 +23,16 @@ Unfortunately, the MouseLeftButtonUp event will only be triggered if the ‘mous
 
 So, if we use this XAML:
 
-<script src="https://gist.github.com/kevingosse/86542120df91a1633b89.js"></script>
+```xml
+<Grid x:Name="ContentPanel" Grid.Row="1" Margin="12,0,12,0" MouseLeftButtonDown="Grid_MouseLeftButtonDown" MouseLeftButtonUp="Grid_MouseLeftButtonUp">
+    <Grid.RowDefinitions>
+        <RowDefinition />
+        <RowDefinition />
+    </Grid.RowDefinitions>
+    <Grid x:Name="g1" Background="Green" MouseLeftButtonDown="Grid_MouseLeftButtonDown" MouseLeftButtonUp="Grid_MouseLeftButtonUp" Tag="dragdrop" />
+    <Grid x:Name="g2" Background="Blue" Grid.Row="1" MouseLeftButtonDown="Grid_MouseLeftButtonDown" MouseLeftButtonUp="Grid_MouseLeftButtonUp" Tag="dragdrop" />
+</Grid>
+```
 
 The layout looks like:
 
@@ -31,7 +40,14 @@ The layout looks like:
 
 In the MouseLeftButtonUp event handler, we want to paint the destination grid:
 
-<script src="https://gist.github.com/kevingosse/e88c5848f1f0130b8375.js"></script>
+```csharp
+private void Grid_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+{
+    var grid = (Grid)sender;
+
+    grid.Background = new SolidColorBrush(Colors.Red);
+}
+```
 
 Unfortunately, it doesn’t work. Press your finger on the upper green grid, MouseLeftButtonDown is triggered. Drag your finger to the lower blue greed, lift your finger, MouseLeftButtonUp isn’t triggered.
 
@@ -39,7 +55,12 @@ I already encountered a similar issue with Silverlight a few years ago, so I kne
 
 In the MouseLeftButtonDown, simply capture the mouse:
 
-<script src="https://gist.github.com/kevingosse/2ee010285994046cbd06.js"></script>
+```csharp
+private void Grid_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+{
+    ((UIElement)sender).CaptureMouse();
+}
+```
 
 Now the MouseLeftButtonUp event is triggered! Unfortunately, it’s triggered on the control we called CaptureMouse on, so we still don’t know on which control the finger was when released. But we have the mouse coordinates, so we should be able to find it somehow.
 
@@ -47,13 +68,41 @@ And that ‘somehow’ is the ‘VisualTreeHelper.FindElementsInHostCoordinates�
 
 So now let’s rewrite our MouseLeftButtonUp event handler, without forgetting to release the mouse capture:
 
-<script src="https://gist.github.com/kevingosse/9a9effa49d0c49ac40c6.js"></script>
+```csharp
+private void Grid_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+{
+    var grid = (Grid)sender;
+
+    grid.ReleaseMouseCapture();
+
+    var mouseUpGrid = VisualTreeHelper.FindElementsInHostCoordinates(e.GetPosition(this), this.ContentPanel)
+        .OfType<Grid>()
+        .FirstOrDefault();
+
+    if (mouseUpGrid != null)
+    {
+        Debug.WriteLine("MouseUp in " + mouseUpGrid.Name);
+        mouseUpGrid.Background = new SolidColorBrush(Colors.Red);
+    }
+}
+```
 
 Test on the emulator, and… it works!
 
 Well, sure it does, but now let’s imagine a more complex scenario:
 
-<script src="https://gist.github.com/kevingosse/5c130b7918f96f0072c3.js"></script>
+```xml
+<Grid x:Name="ContentPanel" Grid.Row="1" Margin="12,0,12,0">
+    <Grid.RowDefinitions>
+        <RowDefinition />
+        <RowDefinition />
+    </Grid.RowDefinitions>
+    <Grid x:Name="g1" Background="Green" MouseLeftButtonDown="Grid_MouseLeftButtonDown" MouseLeftButtonUp="Grid_MouseLeftButtonUp" />
+    <Grid x:Name="DummyGrid" Grid.Row="1" Background="Gray">
+        <Grid x:Name="g2" Background="Blue" Margin="100,0,0,0" MouseLeftButtonDown="Grid_MouseLeftButtonDown" MouseLeftButtonUp="Grid_MouseLeftButtonUp" />
+    </Grid>
+</Grid>
+```
 
 The layout looks like:
 
@@ -67,11 +116,39 @@ What is Tag? It’s an object property available on every control. What is store
 
 In our XAML, let’s add the “dragdrop” string in the Tag of the green and blue grids:
 
-<script src="https://gist.github.com/kevingosse/f1c6041445670f14272b.js"></script>
+```xml
+<Grid x:Name="ContentPanel" Grid.Row="1" Margin="12,0,12,0">
+    <Grid.RowDefinitions>
+        <RowDefinition />
+        <RowDefinition />
+    </Grid.RowDefinitions>
+    <Grid x:Name="g1" Background="Green" MouseLeftButtonDown="Grid_MouseLeftButtonDown" MouseLeftButtonUp="Grid_MouseLeftButtonUp" Tag="dragdrop" />
+    <Grid x:Name="DummyGrid" Grid.Row="1" Background="Gray">
+        <Grid x:Name="g2" Background="Blue" Margin="100,0,0,0" MouseLeftButtonDown="Grid_MouseLeftButtonDown" MouseLeftButtonUp="Grid_MouseLeftButtonUp" Tag="dragdrop" />
+    </Grid>
+</Grid>
+```
 
 Then, in the MouseLeftButtonUp event handler, it’s only a matter of filtering which controls have the appropriate tag:
 
-<script src="https://gist.github.com/kevingosse/edd5758f9ef52b7e8465.js"></script>
+```csharp
+private void Grid_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+{
+    var grid = (Grid)sender;
+
+    grid.ReleaseMouseCapture();
+
+    var mouseUpGrid = VisualTreeHelper.FindElementsInHostCoordinates(e.GetPosition(this), this.ContentPanel)
+        .OfType<Grid>()
+        .FirstOrDefault(element => element.Tag is string && (string)element.Tag == "dragdrop");
+
+    if (mouseUpGrid != null)
+    {
+        Debug.WriteLine("MouseUp in " + mouseUpGrid.Name);
+        mouseUpGrid.Background = new SolidColorBrush(Colors.Red);
+    }
+}
+```
 
 Now the gray grid is excluded, as expected.
 

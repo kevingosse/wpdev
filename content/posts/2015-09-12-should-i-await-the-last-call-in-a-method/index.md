@@ -12,7 +12,22 @@ tags:
 
 I came to write a code looking like this: 
 
-<script src="https://gist.github.com/kevingosse/e962f4748e6df42b5b92.js"></script>
+```csharp
+protected override async void OnNavigatedTo(NavigationEventArgs e)
+{
+    base.OnNavigatedTo(e);
+
+    await this.DoSomethingAsync();
+}
+
+private Task DoSomethingAsync()
+{
+    return Task.Run(() =>
+    {
+        Debug.WriteLine("Doing something");
+    });
+}
+```
 
 Then I stepped back a bit and thought: _OnNavigatedTo_ is an event, and its return type can't be changed from _void._ Therefore, is there a point in awaiting the last asynchronous call of the method, as this will provide no information at all to the caller? Would it result in a useless call to the dispatcher, just to execute an empty callback? Actually, is the compiler smart enough to detect this case and remove the seemingly useless _await_?
 
@@ -20,7 +35,16 @@ Then I stepped back a bit and thought: _OnNavigatedTo_ is an event, and its ret
 
 How to figure out whether the last _await_ call has any impact? Let's say I add some code at the end of the method:  
 
-<script src="https://gist.github.com/kevingosse/e8952b8c83ab66fef4aa.js"></script>
+```csharp
+protected override async void OnNavigatedTo(NavigationEventArgs e)
+{
+    base.OnNavigatedTo(e);
+
+    this.DoSomethingAsync();
+
+    Debug.WriteLine("next");
+}
+```
 
 Then of course the dispatcher will be used after _DoSomethingAsync_ has finished executing, to switch back to the UI thread and execute the _Debug.WriteLine_ statement. But if I put nothing, how to know if the dispatcher still switches to the UI thread?
 
@@ -46,7 +70,14 @@ So far, nothing surprising. _Invoke_ is called at the end of the task, to resum
 
 Now, what if we put nothing after _await_? The method will look like this: 
 
-<script src="https://gist.github.com/kevingosse/4f8c0a63c1c3acf63f34.js"></script>
+```csharp
+protected override async void OnNavigatedTo(NavigationEventArgs e)
+{
+    base.OnNavigatedTo(e);
+
+    await this.DoSomethingAsync();
+}
+```
 
 The result in the Output panel is:
 
@@ -54,7 +85,13 @@ The result in the Output panel is:
 
 It seems that the dispatcher really switched back to the UI thread, even though there is no code left in the method. As an extra precaution, I've also tested the case without _await_:
 
-<script src="https://gist.github.com/kevingosse/864678fdd49200448d1c.js"></script>
+```csharp
+protected override void OnNavigatedTo(NavigationEventArgs e)
+{
+    base.OnNavigatedTo(e);
+    this.DoSomethingAsync();
+}
+```
 
 This time, invoke isn't called, as expected. Sounds like we found a cheap optimization. So cheap that I started wondering why the compiler wasn't already applying it...
 
@@ -62,7 +99,16 @@ This time, invoke isn't called, as expected. Sounds like we found a cheap optimi
 
 What happens when things go wrong in the task? To find out, I changed the code to throw an exception:
 
-<script src="https://gist.github.com/kevingosse/7bd867c4cde404a90914.js"></script>
+```csharp
+private Task DoSomethingAsync()
+{
+    return Task.Run(() =>
+    {
+        Debug.WriteLine("Doing something");
+        throw new Exception();
+    });
+}
+```
 
 Here, the behavior changes drastically depending on whether we use the _await_ keyword or not. If using it, then the application crashes. If not, then nothing happens. Why?
 

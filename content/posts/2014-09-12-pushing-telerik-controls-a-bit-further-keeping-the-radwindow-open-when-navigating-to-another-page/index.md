@@ -19,7 +19,9 @@ My first solution has been to re-open the RadWindow in the Loaded event of the p
 
 I tried to subscribe to the WindowClosing event of the RadWindow, then setting e.Cancel to “true” to cancel the closing. But somehow, the “cancel” instruction is ignored in this specific scenario. Digging into the RadWindow source code explains why:
 
-<script src="https://gist.github.com/kevingosse/5e87b08eb2f1c799fdf2.js"></script>
+```csharp
+if (this.OnWindowClosing() && !this.pageUnloaded)
+```
 
 There is a built-in check to prevent the user from cancelling the closing in this situation. Clearly, the RadWindow has been designed to forbid from doing what I’m trying to do. It’s time to use dirty hacks to bend the rules!
 
@@ -27,13 +29,28 @@ My bet here is to change is to act on the “pageUnloaded” field to trick the 
 
 The only time this value is set is in the “OnPageUnloaded” method of the RadWindow. As its name indicates, this method is a handler for the “Unloaded” event of the page. Let’s just forcefully unsubscribe the event handler. The handler is set when opening the RadWindow. The control has a “UnsubscribeFromPageUnloaded” method, which makes our work a tad easier. The method is private, so we have to use reflection to call it every time we open the popup:
 
-<script src="https://gist.github.com/kevingosse/f2227a350d2fd7bc545e.js"></script>
+```csharp
+this.PopupDetail.IsOpen = true;
+
+var unsubscribe = this.PopupDetail.GetType().GetMethod("UnsubscribeFromPageUnloaded", BindingFlags.Instance | BindingFlags.NonPublic);
+unsubscribe.Invoke(this.PopupDetail, null);
+```
 
 (PopupDetail is the name of my RadWindow)
 
 Once this code has been added, the “pageUnloaded” field is never set, and we can cancel the WindowClosing event even if the page is being unloaded. The only subtlety left is: how to cancel the event only when the page is being unloaded, and not when we’re trying to legitimately close the popup? There’s many ways to do that, but I noticed that the RadWindow disables the closing animation on this specific situation, so we may as well use that to our advantage:
 
-<script src="https://gist.github.com/kevingosse/c666f5d26fc934089e69.js"></script>
+```csharp
+private void PopupDetail_WindowClosing(object sender, System.ComponentModel.CancelEventArgs e)
+{
+    var window = (RadWindow)sender;
+
+    if (window.CloseAnimation == RadAnimation.Empty)
+    {
+        e.Cancel = true;
+    }
+}
+```
 
 (of course, it won’t work if you manually disabled the closing animation)
 

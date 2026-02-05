@@ -18,10 +18,24 @@ In this example, we create an application with three pages (Page1, Page2, and Pa
 
 First, change the manifest to use an inexistent dummy starting page:
 
-<script src="https://gist.github.com/kevingosse/44068b781fef534f99fb.js"></script>
+```xml
+<DefaultTask Name="_default" NavigationPage="DummyPage.xaml" />
+```
 
 Now, create the UriMapper at the end of the Application constructor (in the App.xaml.cs file) and map the DummyPage to a random page. Then assign the UriMapper to the root frame:
 
-<script src="https://gist.github.com/kevingosse/93fe44dcde5ad32706f9.js"></script>
+```csharp
+var mapper = new UriMapper();
+
+int random = new Random().Next(0, 3);
+
+mapper.UriMappings.Add(new UriMapping
+{
+    Uri = new Uri("/DummyPage.xaml", UriKind.Relative),
+    MappedUri = new Uri("/Page" + (random + 1) + ".xaml", UriKind.Relative)
+});
+
+this.RootFrame.UriMapper = mapper;
+```
 
 And you’re done! Every time you start the application, one of the three pages will be picked at random.

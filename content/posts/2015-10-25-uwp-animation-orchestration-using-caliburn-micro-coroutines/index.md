@@ -24,15 +24,39 @@ Caliburn.Micro provides an elegant solution, through the use of so-called corout
 
 First, start a new project, using the template "Caliburn.Micro Windows 10 Template" (this template can be found by going in the "online" tab in the "New project" dialog of Visual Studio). It creates a simple MVVM application, with a few buttons. We start by adding our own button next to the others, with an attached _TranslateTransform_:
 
-<script src="https://gist.github.com/kevingosse/e5d929890f879bee8364.js"></script>
+```xml
+<Button Content="Show dialog after transition"
+        x:Name="TestCoroutine"
+        HorizontalAlignment="Stretch"
+        VerticalAlignment="Center">
+    <Button.RenderTransform>
+        <TranslateTransform x:Name="TestTranslate" />
+    </Button.RenderTransform>
+</Button>
+```
 
 Then, in the page resources, we add a simple storyboard to animate the button:
 
-<script src="https://gist.github.com/kevingosse/b23fe04fce9e6975b212.js"></script>
+```xml
+<Page.Resources>
+    <Storyboard x:Key="TestAnimation">
+        <DoubleAnimation
+            Storyboard.TargetName="TestTranslate"
+            Storyboard.TargetProperty="Y"
+            To="100"
+            Duration="0:0:4" />
+    </Storyboard>
+</Page.Resources>
+```
 
 In the viewmodel, we create an action with the same name as the button. Caliburn.Micro will automatically wire them together:
 
-<script src="https://gist.github.com/kevingosse/14b914ead2e562f60e97.js"></script>
+```csharp
+public async Task TestCoroutine()
+{
+    await _userNotificationService.ShowMessageDialogAsync("This is a message dialog sample!");
+}
+```
 
 Click on the button, and a message box will be displayed. Nothing fancy so far. Now, how to play the animation before the message box?
 
@@ -40,16 +64,70 @@ Click on the button, and a message box will be displayed. Nothing fancy so far. 
 
 Coroutines in Caliburn.Micro are classes implementing the _**IResult**_ interface. The interface defines two member: an _**Execute**_ method, that contains the core logic of your coroutine, and a _**Completed**_ event, that you need to trigger when you're done. We're going to write a _StartAnimationResult_ object, that takes the name of a storyboard and starts it:
 
-<script src="https://gist.github.com/kevingosse/37ad02e24c19d871877e.js"></script>
+```csharp
+public class StartAnimationResult : IResult
+{
+    public string StoryboardName { get; private set; }
+
+    public event EventHandler<ResultCompletionEventArgs> Completed;
+
+    public StartAnimationResult(string storyboardName)
+    {
+        this.StoryboardName = storyboardName;
+    }
+
+    public void Execute(CoroutineExecutionContext context)
+    {
+        var view = context.View as FrameworkElement;
+
+        if (view != null)
+        {
+            var storyboard = view.Resources[this.StoryboardName] as Storyboard;
+
+            if (storyboard != null)
+            {
+                EventHandler<object> onCompleted = null;
+
+                onCompleted = (s, e) =>
+                {
+                    storyboard.Completed -= onCompleted;
+                    this.Completed(this, new ResultCompletionEventArgs());
+                };
+
+                storyboard.Completed += onCompleted;
+                storyboard.Begin();
+
+                return;
+            }
+        }
+
+        this.Completed(this, new ResultCompletionEventArgs());
+    }
+}
+```
 
 The _Execute_ method has one parameter, of type _CoroutineExecutionContext_. Among other thing, this object allows us to retrieve a reference to the view. From there, we try to find a storyboard with the given name in the resources of the page. If none is found, we do nothing and just raise the _Completed_ event. On the other hand, if the storyboard is found, we start it and wait for its completion before raising the _Completed_ event.
 
 To use it, we change the signature of our command to return an _**IEnumerable<IResult>**_:
 
-<script src="https://gist.github.com/kevingosse/371b259cfa4f61c97170.js"></script>
+```csharp
+public IEnumerable<IResult> TestCoroutine()
+{
+    yield return new StartAnimationResult("TestAnimation");
+
+    _userNotificationService.ShowMessageDialogAsync("This is a message dialog sample!");
+}
+```
 
 Try it, and you'll see that the 4 seconds animation is played fully before the message box is displayed. You may notice that we're not awaiting the "ShowMessageDialogAsync" method anymore. That's because it's currently impossible to use the "_yield return_" instruction in an async method. Fortunately, the Caliburn.Micro developers got us covered. Using the "_**.AsResult()**_" extension method, we can wrap our async call in a _TaskResult_ object. Then returning this object is pretty much equivalent to using an _await_ statement:
 
-<script src="https://gist.github.com/kevingosse/f66c729969670dd97114.js"></script>
+```csharp
+public IEnumerable<IResult> TestCoroutine()
+{
+    yield return new StartAnimationResult("TestAnimationA");
+
+    yield return _userNotificationService.ShowMessageDialogAsync("This is a message dialog sample!").AsResult();
+}
+```
 
 Overall, this is a very powerful tool, as it allows us to orchestrate the view without taking a dependency on it. If tomorrow the view changes and the storyboard is removed, the viewmodel will still work as-is, since we made sure to handle this case in the coroutine. In the end, it becomes no more than a contract between the viewmodel and the view, and the view implementation isn't leaking into the viewmodel. Note that you could use the same mechanism for other purposes, for instance changing the visual state.

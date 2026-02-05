@@ -17,7 +17,11 @@ How? The output of every WP7 project is a .xap file, which is just a zip file wi
 
 First, create a basic application, and put an image control in the xaml:
 
-<script src="https://gist.github.com/kevingosse/39570691111f95da3e8b.js"></script>
+```xml
+<Grid x:Name="ContentPanel" Grid.Row="1" Margin="12,0,12,0">
+    <Image Source="someimage.png" Width="300" Height="300" x:Name="Image" />
+</Grid>
+```
 
 Make sure that the ‘someimage.png’ file does not exist in your project. Compile, run, and surely enough nothing is displayed.
 

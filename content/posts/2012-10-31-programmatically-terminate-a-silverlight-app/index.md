@@ -17,8 +17,13 @@ Windows Phone 8 brings a new API, that can be used from Silverlight applications
 
 Using it is really straightforward:
 
-<script src="https://gist.github.com/kevingosse/b3c29f0bf243dd336553.js"></script>
+```csharp
+Application.Current.Terminate();
+```
 
 A word of advice though: calling this method will **immediately** kill your app. It means that the ‘Application.Closing’ event won’t be triggered, and the contents of the ‘IsolatedStorageSettings.ApplicationSettings’ dictionary won’t be automatically saved to the isolated storage. Therefore, if needed, don’t forget to save that dictionary before calling the ‘Terminate’ method:
 
-<script src="https://gist.github.com/kevingosse/62ae7c2855efc3239ad3.js"></script>
+```csharp
+IsolatedStorageSettings.ApplicationSettings.Save();
+Application.Current.Terminate();
+```

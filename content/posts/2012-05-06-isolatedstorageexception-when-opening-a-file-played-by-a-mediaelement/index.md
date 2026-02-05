@@ -15,7 +15,16 @@ Today we’ll dig a little into Windows Phone’s base class library, thanks to 
 
 The problem occurs with this simple code, used to load a music file from the isolated storage, and play it with a MediaElement:
 
-<script src="https://gist.github.com/kevingosse/5298b8f8ca6aa72195f8.js"></script>
+```csharp
+using (var storage = IsolatedStorageFile.GetUserStoreForApplication())
+{
+    using (var isfs = storage.OpenFile("myfile.mp3", FileMode.Open))
+    {
+        this.media.SetSource(isfs);
+        isfs.Close();
+    }
+}
+```
 
 When executed for the first time, this code works fine. When executed a second time with the same file, it throws an IsolatedStorageException: “Operation not permitted on IsolatedStorageFileStream”.
 
@@ -23,13 +32,38 @@ There isn’t many situations where opening a file from the isolated storage wil
 
 The default value of the ‘FileShare’ parameter in the IsolatedStorageFileStream constructor is ‘FileShare.ReadWrite’. If a file is opened with this flag, any concurrent operation on the same file will fail. And indeed, everything works fine once the code is replaced by:
 
-<script src="https://gist.github.com/kevingosse/980bf07a8805361b395f.js"></script>
+```csharp
+using (var storage = IsolatedStorageFile.GetUserStoreForApplication())
+{
+    using (var isfs = storage.OpenFile("myfile.mp3", FileMode.Open, FileAccess.Read, FileShare.Read))
+    {
+        this.media.SetSource(isfs);
+        isfs.Close();
+    }
+}
+```
 
 Now the thing that has been bugging me is: why is there any concurrency issue, since the stream is correctly closed? Note that the ‘Stream.Close’ method is even explicitly closed, even though the dispose should suffice!
 
 To figure that out, I decided to launch Reflector and dig into the source code of the MediaElement.SetSource method:
 
-<script src="https://gist.github.com/kevingosse/879873e8c73ef56ef68c.js"></script>
+```csharp
+public void SetSource(Stream stream)
+{
+    if (stream == null)
+    {
+        throw new ArgumentNullException("stream");
+    }
+    if (stream.GetType() != typeof(IsolatedStorageFileStream))
+    {
+        throw new NotSupportedException("Stream must be of type IsolatedStorageFileStream");
+    }
+    IsolatedStorageFileStream stream2 = stream as IsolatedStorageFileStream;
+    stream2.Flush();
+    stream2.Close();
+    this.Source = new Uri(stream2.Name, UriKind.Absolute);
+}
+```
 
 As surprising as it may first seem, the SetSource method doesn’t use the data stored in the stream. It even flushes and closes the stream! All it does is just storing the name of the stream, and the MediaElement will manually re-open the file when you call the ‘Play’ method. And since the control has it own handle on the file, any attempt to open the file with exclusive access while the music is playing will fail.
 
