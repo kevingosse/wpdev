@@ -10,7 +10,28 @@ tags:
 
 It started from [a question on StackOverflow](http://stackoverflow.com/questions/43028703/reflection-renders-hashcode-unstable/). The following code will return inconsistent value for the hashcode of the attribute:
 
-https://gist.github.com/kevingosse/bbc1c7408ba56b406f0942f20fc26782
+```csharp
+static void Main(string[] args)
+{
+    typeof(SomeClass).GetCustomAttributes(false);//without this line, GetHashCode behaves as expected
+
+    SomeAttribute tt = new SomeAttribute();
+    Console.WriteLine(tt.GetHashCode());//Prints 1234567
+    Console.WriteLine(tt.GetHashCode());//Prints 0
+    Console.WriteLine(tt.GetHashCode());//Prints 0
+}
+
+[SomeAttribute(field2 = 1)]
+class SomeClass
+{
+}
+
+class SomeAttribute : System.Attribute
+{
+    uint field1=1234567;
+    public uint field2;
+}
+```
 
 This will print the output:
 
@@ -18,9 +39,24 @@ This will print the output:
 
 We can see that the hashcode value changes between the first and second invocation. Even more interesting, commenting line 3 seems to fix the behavior and **GetHashCode** will always return 1234567.
 
-To understand what’s going on, we first need to look at the source code of the **Attribute.GetHashCode** method:
+To understand what's going on, we first need to look at the source code of the **Attribute.GetHashCode** method:
 
-https://gist.github.com/kevingosse/f179d7d0e0285e5e6245bb1ba5d22e30
+```csharp
+public override int GetHashCode()
+{
+    FieldInfo[] fields = this.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+    foreach (FieldInfo field in fields)
+    {
+        object value = field.GetValue(this);
+
+        if (value != null && !value.GetType().IsArray)
+            return value.GetHashCode();
+    }
+
+    return this.GetType().GetHashCode();
+}
+```
 
 In a nutshell, what it does is:
 
@@ -35,7 +71,27 @@ We can make two conclusions at that point:
 
 With those conclusion, we can hypothesize that for some reason, the order of the fields returned by **Type.GetFields** changes over time. This can actually be verified easily:
 
-https://gist.github.com/kevingosse/28d183ffa6c731dcf61d8f96eca3547c
+```csharp
+static void Main(string[] args)
+{
+    void DisplayAttributes()
+    {
+        var fields = new SomeAttribute()
+          .GetType()
+          .GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+        foreach (var field in fields)
+        {
+            Console.WriteLine(field.Name);
+        }
+    }
+
+    typeof(SomeClass).GetCustomAttributes(false);
+
+    DisplayAttributes();
+    DisplayAttributes();
+}
+```
 
 This code will display:
 
@@ -71,7 +127,12 @@ On the other hand, if we call **typeof(SomeClass).GetCustomAttributes(false)** f
 
 Why field2? Because we access that field on the attribute applied to **SomeClass**:
 
-https://gist.github.com/kevingosse/9c58c41f934e82deeb5c947cc5faf591
+```csharp
+[SomeAttribute(field2 = 1)]
+class SomeClass
+{
+}
+```
 
 Then, after calling **GetHashCode**, the cache will be filled out with the missing field and will contain:
 
@@ -83,11 +144,35 @@ The only mystery left is: in that case, why is the first call to GetHashCode ret
 
 The answer lies in the way the cache is implemented. First, in the **RuntimeTypeCache.MemberInfoCache<T>.GetMemberList** method:
 
-https://gist.github.com/kevingosse/8ad3aa0eb946337c592737e54d93053c
+```csharp
+private T[] GetMemberList(RuntimeType.MemberListType listType, RuntimeType.RuntimeTypeCache.CacheType cacheType)
+{
+    if (Volatile.Read(ref this.m_cacheComplete))
+        return this.m_allMembers;
+
+    return this.Populate(null, listType, cacheType);
+}
+```
 
 First we check if the cache is complete. If so, we return it directly. If not, we return the result of the **Populate** method. What is this method doing?
 
-https://gist.github.com/kevingosse/32e35a2cd38944a115bb5a7cfe960e86
+```csharp
+private unsafe T[] Populate(string name, RuntimeType.MemberListType listType, RuntimeType.RuntimeTypeCache.CacheType cacheType)
+{
+    T[] listByName;
+    if (name == null || name.Length == 0 || cacheType == RuntimeType.RuntimeTypeCache.CacheType.Constructor &&
+        (int) name.FirstChar != 46 && (int) name.FirstChar != 42)
+    {
+        listByName = this.GetListByName((char*) null, 0, (byte*) null, 0, listType, cacheType);
+    }
+    else
+    {
+        // ... other logic
+    }
+    this.Insert(ref listByName, name, listType);
+    return listByName;
+}
+```
 
 (stripped for simplicity) First, we retrieve the list of all fields. Then, the **Insert** method adds to the cache the fields that were previously missing. Finally, we return **the original list**. That’s the keypoint.
 
@@ -104,8 +189,21 @@ https://gist.github.com/kevingosse/32e35a2cd38944a115bb5a7cfe960e86
 
 I believe this is a bug. The value returned by **GetHashCode** shouldn’t change if the underlying object hasn’t been modified. Otherwise, it’ll cause inconsistent and dangerous behavior with the collections that use it. Consider for instance the following code:
 
-https://gist.github.com/kevingosse/733ff36de3f8c8f59e8a8baf013794e3
+```csharp
+var hashSet = new HashSet<SomeAttribute>();
 
-We’re adding the same instance twice to a hashset. Everytime, we call **Contains** and display the result. The first time, “False” will be displayed. The second time, “True” will be displayed. Furthermore, the hashset reports that it contains two different items even though we added the same one everytime!
+typeof(SomeClass).GetCustomAttributes(false);
+SomeAttribute tt = new SomeAttribute();
+
+hashSet.Add(tt);
+Console.WriteLine(hashSet.Contains(tt)); // Will display false
+
+hashSet.Add(tt);
+Console.WriteLine(hashSet.Contains(tt)); // Will display true
+
+Console.WriteLine(hashSet.Count); // Will display 2
+```
+
+We're adding the same instance twice to a hashset. Everytime, we call **Contains** and display the result. The first time, “False” will be displayed. The second time, “True” will be displayed. Furthermore, the hashset reports that it contains two different items even though we added the same one everytime!
 
 All in one, **Attribute.GetHashCode** shouldn’t rely on the order of the fields returned by **Type.GetFields**, as it can change over time.

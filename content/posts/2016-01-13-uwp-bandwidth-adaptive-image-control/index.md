@@ -31,49 +31,166 @@ The first solution would cause a racing condition that is tricky to solve, when 
 
  
 
-https://gist.github.com/70e1d24d241776936595
+```csharp
+namespace CustomControls
+{
+    public class AdaptiveImageSource
+    {
+        public AdaptiveImageSource(string hiResSource, string lowResSource)
+        {
+            this.HiResSource = hiResSource;
+            this.LowResSource = lowResSource;
+        }
+
+        public string HiResSource { get; }
+
+        public string LowResSource { get; }
+    }
+}
+```
 
  
 
 We create the main class for our custom control, and expose the adaptive image source through a dependency property:
 
-https://gist.github.com/4581793e638badab1af1
+```csharp
+namespace CustomControls
+{
+    public class AdaptiveImage : ContentControl
+    {
+        public static readonly DependencyProperty SourceProperty = DependencyProperty.Register(
+            "Source",
+            typeof(AdaptiveImageSource),
+            typeof(AdaptiveImage),
+            new PropertyMetadata(null, OnSourceChanged));
+
+        public AdaptiveImageSource Source
+        {
+            get { return this.GetValue(SourceProperty) as AdaptiveImageSource; }
+            set { this.SetValue(SourceProperty, value); }
+        }
+
+        private static void OnSourceChanged(DependencyObject sender, DependencyPropertyChangedEventArgs e)
+        {
+            // TODO
+        }
+    }
+}
+```
 
  
 
 Now it’s time to fill the holes. First, in the constructor, we create the grid that will hold the control and we prepare the progress indicator:
 
-https://gist.github.com/18d5ad3eb4c251b03f7d
+```csharp
+public AdaptiveImage()
+{
+    this.LayoutRoot = new Grid();
+    this.Content = this.LayoutRoot;
+
+    this.ProgressIndicator = new ProgressRing
+    {
+        Foreground = new SolidColorBrush { Color = Colors.White },
+        Width = 100,
+        Height = 100,
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        VerticalAlignment = VerticalAlignment.Stretch
+    };
+}
+
+protected Grid LayoutRoot { get; }
+```
 
  
 
 When a new source is set, we want to first load the low-resolution version of the picture. We’ll load it no matter what the conditions are: even if we load the hi-resolution picture, it’ll provide a nice placeholder in the meantime. We’ll do all the loading in a method called _StartLoading_ that will be called every time the source is changed:
 
-https://gist.github.com/015fbc45c2fc5b5b83b6
+```csharp
+private static void OnSourceChanged(DependencyObject sender, DependencyPropertyChangedEventArgs e)
+{
+    (sender as AdaptiveImage)?.StartLoading();
+}
+
+private void StartLoading()
+{
+    // TODO
+}
+```
 
  
 
 First, since the source may have already been set previously, we start by clearing everything. Then, we assign the source to a local variable to avoid any racing condition:
 
-https://gist.github.com/33f6d19b18cc95ba29aa
+```csharp
+this.LayoutRoot.Children.Clear();
+this.LowResImage = null;
+this.HiResImage = null;
+
+var source = this.Source;
+```
 
  
 
 If the source is empty, we stop there. Otherwise, we initialize the BitmapImage source, assign it to an Image control, and put it in the grid:
 
-https://gist.github.com/112689f4a048f0554541
+```csharp
+if (source?.LowResSource == null)
+{
+    return;
+}
+
+var lowResSource = new BitmapImage { UriSource = new Uri(source.LowResSource) };
+this.LowResImage = new Image { Source = lowResSource };
+
+this.LayoutRoot.Children.Add(this.LowResImage);
+```
 
  
 
 After doing that, the low-resolution picture will load and be displayed as expected. Now it’s time to take care of the high-resolution picture:
 
-https://gist.github.com/8b449615e601f61d567b
+```csharp
+if (source.HiResSource != null)
+{
+    this.ProgressIndicator.IsActive = true;
+    this.LayoutRoot.Children.Add(this.ProgressIndicator);
+
+    var hiResSource = new BitmapImage();
+
+    hiResSource.ImageOpened += this.ImageOpened;
+    hiResSource.ImageFailed += this.ImageFailed;
+
+    hiResSource.UriSource = new Uri(source.HiResSource);
+
+    this.HiResImage = new Image { Source = hiResSource };
+
+    this.LayoutRoot.Children.Add(this.HiResImage);
+
+    this.HiResImage.Visibility = Visibility.Collapsed;
+}
+```
 
  
 
 It’s pretty much the same thing as the low-resolution picture, except that we start the progress indicator then subscribe to the _ImageOpened_ and _ImageFailed_ event. We use those to hide the progress indicator and, if the loading was successful, hide the low-resolution picture:
 
-https://gist.github.com/add1eee2c57e711941d4
+```csharp
+private void ImageFailed(object sender, ExceptionRoutedEventArgs e)
+{
+    this.ProgressIndicator.IsActive = false;
+}
+
+private void ImageOpened(object sender, RoutedEventArgs e)
+{
+    if (this.HiResImage != null)
+    {
+        this.LayoutRoot.Children.Remove(this.LowResImage);
+        this.HiResImage.Visibility = Visibility.Visible;
+
+        this.ProgressIndicator.IsActive = false;
+    }
+}
+```
 
  
 
@@ -89,17 +206,57 @@ I wanted to be able to use this control along with my [Ken Burns effect control]
 
 We start by exposing the datatemplate in a dependency property:
 
-https://gist.github.com/e86d8a9443affc68edbc
+```csharp
+public static readonly DependencyProperty ImageTemplateProperty = DependencyProperty.Register(
+    "ImageTemplate",
+    typeof(DataTemplate),
+    typeof(AdaptiveImage),
+    null);
+
+public DataTemplate ImageTemplate
+{
+    get { return this.GetValue(ImageTemplateProperty) as DataTemplate; }
+    set { this.SetValue(ImageTemplateProperty, value); }
+}
+```
 
 Then we make a _CreateImage_ method that takes care of realizing the template if one is provided, otherwise it creates a simple Image control:
 
-https://gist.github.com/920ff3aaa644a60c4982
+```csharp
+private FrameworkElement CreateImage()
+{
+    var customElement = this.ImageTemplate?.LoadContent() as FrameworkElement;
+
+    if (customElement != null)
+    {
+        return customElement;
+    }
+
+    var image = new Image();
+
+    image.SetBinding(Image.SourceProperty, new Binding());
+
+    return image;
+}
+```
 
 Note that this time we’ll provide the image source by the data context. Therefore, we bind the _Source_ property to the said datacontext. We also need to go back to the _StartLoading_ method to call _CreateImage_ whenever we manually created an Image control.
 
 Now we can easily provide a custom template whenever we use the control:
 
-https://gist.github.com/afaf83c1295ea8d08839
+```xml
+<controls:AdaptiveImage
+    Source="{Binding Path=Image}">
+    <controls:AdaptiveImage.ImageTemplate>
+        <DataTemplate>
+            <controls:SlidingImage
+                MaxHeight="265"
+                Stretch="UniformToFill"
+                Source="{Binding}" />
+        </DataTemplate>
+    </controls:AdaptiveImage.ImageTemplate>
+</controls:AdaptiveImage>
+```
 
  
 
@@ -107,7 +264,30 @@ https://gist.github.com/afaf83c1295ea8d08839
 
 The last touch is about skipping the hi-resolution picture when the user is on a limited data plan. We use the _NetworkInformation.GetInternetConnectionProfile()_ to retrieve information about the current connection, then we apply [the guidelines provided by Microsoft](https://msdn.microsoft.com/fr-fr/library/windows/apps/jj207005\(v=vs.105\).aspx#BKMK_SuggestedAppBehaviors)  to know whether to throttle down the data usage:
 
-https://gist.github.com/3933dd3f2197ad7be350
+```csharp
+private static bool ShouldLoadHiResolutionPicture()
+{
+    var connectionCost = NetworkInformation.GetInternetConnectionProfile()?.GetConnectionCost();
+
+    if (connectionCost == null)
+    {
+        return false;
+    }
+
+    switch (connectionCost.NetworkCostType)
+    {
+        case NetworkCostType.Unrestricted:
+            return true;
+
+        case NetworkCostType.Fixed:
+        case NetworkCostType.Variable:
+            return !connectionCost.ApproachingDataLimit && !connectionCost.OverDataLimit && !connectionCost.Roaming;
+
+        default:
+            return false;
+    }
+}
+```
 
  
 
@@ -117,4 +297,167 @@ Thankfully, the WinRT runtime is much more reliable than Silverlight when it com
 
 You can find the full code for the control here:
 
-https://gist.github.com/777499d724ce298c3228
+```csharp
+using System;
+using Windows.Networking.Connectivity;
+using Windows.UI;
+using Windows.UI.Xaml;
+using Windows.UI.Xaml.Controls;
+using Windows.UI.Xaml.Data;
+using Windows.UI.Xaml.Media;
+using Windows.UI.Xaml.Media.Imaging;
+
+namespace CustomControls
+{
+    public class AdaptiveImage : ContentControl
+    {
+        public static readonly DependencyProperty SourceProperty = DependencyProperty.Register(
+            "Source",
+            typeof(AdaptiveImageSource),
+            typeof(AdaptiveImage),
+            new PropertyMetadata(null, OnSourceChanged));
+
+        public static readonly DependencyProperty ImageTemplateProperty = DependencyProperty.Register(
+            "ImageTemplate",
+            typeof(DataTemplate),
+            typeof(AdaptiveImage),
+            null);
+
+        public AdaptiveImage()
+        {
+            this.LayoutRoot = new Grid();
+            this.Content = this.LayoutRoot;
+
+            this.ProgressIndicator = new ProgressRing
+            {
+                Foreground = new SolidColorBrush { Color = Colors.White },
+                Width = 100,
+                Height = 100,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch
+            };
+        }
+
+        public DataTemplate ImageTemplate
+        {
+            get { return this.GetValue(ImageTemplateProperty) as DataTemplate; }
+            set { this.SetValue(ImageTemplateProperty, value); }
+        }
+
+        public AdaptiveImageSource Source
+        {
+            get { return this.GetValue(SourceProperty) as AdaptiveImageSource; }
+            set { this.SetValue(SourceProperty, value); }
+        }
+
+        protected Grid LayoutRoot { get; }
+
+        private FrameworkElement LowResImage { get; set; }
+
+        private FrameworkElement HiResImage { get; set; }
+
+        private ProgressRing ProgressIndicator { get; set; }
+
+        private static void OnSourceChanged(DependencyObject sender, DependencyPropertyChangedEventArgs e)
+        {
+            (sender as AdaptiveImage)?.StartLoading();
+        }
+
+        private static bool ShouldLoadHiResolutionPicture()
+        {
+            var connectionCost = NetworkInformation.GetInternetConnectionProfile()?.GetConnectionCost();
+
+            if (connectionCost == null)
+            {
+                return false;
+            }
+
+            switch (connectionCost.NetworkCostType)
+            {
+                case NetworkCostType.Unrestricted:
+                    return true;
+
+                case NetworkCostType.Fixed:
+                case NetworkCostType.Variable:
+                    return !connectionCost.ApproachingDataLimit && !connectionCost.OverDataLimit && !connectionCost.Roaming;
+
+                default:
+                    return false;
+            }
+        }
+
+        private FrameworkElement CreateImage()
+        {
+            var customElement = this.ImageTemplate?.LoadContent() as FrameworkElement;
+
+            if (customElement != null)
+            {
+                return customElement;
+            }
+
+            var image = new Image();
+
+            image.SetBinding(Image.SourceProperty, new Binding());
+
+            return image;
+        }
+
+        private void StartLoading()
+        {
+            this.LayoutRoot.Children.Clear();
+            this.LowResImage = null;
+            this.HiResImage = null;
+
+            var source = this.Source;
+
+            if (source?.LowResSource == null)
+            {
+                return;
+            }
+
+            var lowResSource = new BitmapImage { UriSource = new Uri(source.LowResSource) };
+
+            this.LowResImage = this.CreateImage();
+            this.LowResImage.DataContext = lowResSource;
+
+            this.LayoutRoot.Children.Add(this.LowResImage);
+
+            if (source.HiResSource != null && ShouldLoadHiResolutionPicture())
+            {
+                this.ProgressIndicator.IsActive = true;
+                this.LayoutRoot.Children.Add(this.ProgressIndicator);
+
+                var hiResSource = new BitmapImage();
+
+                hiResSource.ImageOpened += this.ImageOpened;
+                hiResSource.ImageFailed += this.ImageFailed;
+
+                hiResSource.UriSource = new Uri(source.HiResSource);
+
+                this.HiResImage = this.CreateImage();
+
+                this.HiResImage.DataContext = hiResSource;
+                this.LayoutRoot.Children.Add(this.HiResImage);
+
+                this.HiResImage.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private void ImageFailed(object sender, ExceptionRoutedEventArgs e)
+        {
+            this.ProgressIndicator.IsActive = false;
+        }
+
+        private void ImageOpened(object sender, RoutedEventArgs e)
+        {
+            if (this.HiResImage != null)
+            {
+                this.LayoutRoot.Children.Remove(this.LowResImage);
+                this.HiResImage.Visibility = Visibility.Visible;
+
+                this.ProgressIndicator.IsActive = false;
+            }
+        }
+    }
+}
+```

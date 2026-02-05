@@ -23,7 +23,44 @@ The issue is so obvious that most MVVM frameworks I’ve tried provide a solutio
 
  
 
-https://gist.github.com/b39718a6d5cbf6a064aa
+```csharp
+public class NavigationService : IDisposable
+{
+    public NavigationService()
+    {
+        SystemNavigationManager.GetForCurrentView().BackRequested += this.OnBackRequested;
+    }
+
+    public event EventHandler<BackRequestedEventArgs> BackRequested;
+
+    public void Dispose()
+    {
+        SystemNavigationManager.GetForCurrentView().BackRequested -= this.OnBackRequested;
+    }
+
+    private void OnBackRequested(object sender, BackRequestedEventArgs e)
+    {
+        this.BackRequested?.Invoke(sender, e);
+
+        if (!e.Handled)
+        {
+            Debug.WriteLine("Back handled by navigation service");
+            e.Handled = true;
+            this.GoBack();
+        }
+    }
+
+    private void GoBack()
+    {
+        var rootFrame = Window.Current.Content as Frame;
+
+        if (rootFrame?.CanGoBack == true)
+        {
+            rootFrame.GoBack();
+        }
+    }
+}
+```
 
  
 
@@ -47,19 +84,87 @@ First, we need some technical background. In .NET, events actually are just mult
 
 To create a multicast-delegate, you can use the **[Delegate.Combine](https://msdn.microsoft.com/en-us/library/b1eh4771\(v=vs.110\).aspx)** method: it takes two delegates, and combine them as one. The interesting behavior here is that, when invoking the resulting multicast-delegate, the delegate used as first parameter is invoked first, followed by the one used as second parameter. So internally, whenever you subscribe to an event, the runtime is doing something like:
 
-https://gist.github.com/kevingosse/363658013600c3c8fb45
+```csharp
+newEventHandler = Delegate.Combine(previousEventHandler, yourHandler);
+```
 
 Well then, all we have to do is reversing the order of the parameters!
 
 Taking our previous NavigationService, we introduce a new method called **SubscribeBefore.** As the name indicates, it allows to subscribe to the event, but raises the handler before any previously subscribed one:
 
-https://gist.github.com/kevingosse/9f8cd79ef1e49de385d6
+```csharp
+public class NavigationService : IDisposable
+{
+    public NavigationService()
+    {
+        SystemNavigationManager.GetForCurrentView().BackRequested += this.OnBackRequested;
+    }
+
+    public event EventHandler<BackRequestedEventArgs> BackRequested;
+
+    public void SubscribeBefore(EventHandler<BackRequestedEventArgs> handler)
+    {
+        this.BackRequested = (EventHandler<BackRequestedEventArgs>)Delegate.Combine(handler, this.BackRequested);
+    }
+
+    public void Dispose()
+    {
+        SystemNavigationManager.GetForCurrentView().BackRequested -= this.OnBackRequested;
+    }
+
+    private void OnBackRequested(object sender, BackRequestedEventArgs e)
+    {
+        this.BackRequested?.Invoke(sender, e);
+
+        if (!e.Handled)
+        {
+            Debug.WriteLine("Back handled by navigation service");
+            e.Handled = true;
+            this.GoBack();
+        }
+    }
+
+    private void GoBack()
+    {
+        var rootFrame = Window.Current.Content as Frame;
+
+        if (rootFrame?.CanGoBack == true)
+        {
+            rootFrame.GoBack();
+        }
+    }
+}
+```
 
  
 
 We can test it with this code:
 
-https://gist.github.com/kevingosse/99ad64f1bd1c2dd40f81
+```csharp
+public MainPage()
+{
+    SystemNavigationManager.GetForCurrentView().AppViewBackButtonVisibility = AppViewBackButtonVisibility.Visible;
+
+    this.NavigationService = new NavigationService();
+
+    this.NavigationService.BackRequested += this.OnBackRequested1;
+    this.NavigationService.SubscribeBefore(this.OnBackRequested2);
+
+    this.InitializeComponent();
+}
+
+private NavigationService NavigationService { get; }
+
+private void OnBackRequested1(object sender, BackRequestedEventArgs e)
+{
+    Debug.WriteLine("OnBackRequested1");
+}
+
+private void OnBackRequested2(object sender, BackRequestedEventArgs e)
+{
+    Debug.WriteLine("OnBackRequested2");
+}
+```
 
  
 
@@ -71,7 +176,10 @@ The second event handler has been executed first, even though it subscribed firs
 
 And since we’re manipulating the same multicast-delegate as the event, we can still unsubscribe the old way:
 
-https://gist.github.com/kevingosse/f9fa3255a811e88e8b52
+```csharp
+this.NavigationService.BackRequested -= this.OnBackRequested1;
+this.NavigationService.BackRequested -= this.OnBackRequested2;
+```
 
  
 
@@ -79,8 +187,67 @@ https://gist.github.com/kevingosse/f9fa3255a811e88e8b52
 
 There’s still one last thing bothering me: in one case we use an event, in the other a method. It would be much more elegant if we could use an event for both cases. For that, we’re going to take advantage of one little known fact: you can create properties for events, just like you would do for a classical field. The only difference are that you need to use the verbs **add** and **remove** instead of **get** and **set**.
 
-https://gist.github.com/kevingosse/8583b11a63790e2a39f1
+```csharp
+public class NavigationService : IDisposable
+{
+    public NavigationService()
+    {
+        SystemNavigationManager.GetForCurrentView().BackRequested += this.OnBackRequested;
+    }
+
+    public event EventHandler<BackRequestedEventArgs> PreemptiveBackRequested
+    {
+        add { this.SubscribeBefore(value); }
+        remove { this.BackRequested -= value; }
+    }
+
+    public event EventHandler<BackRequestedEventArgs> BackRequested;
+
+    public void SubscribeBefore(EventHandler<BackRequestedEventArgs> handler)
+    {
+        this.BackRequested = (EventHandler<BackRequestedEventArgs>)Delegate.Combine(handler, this.BackRequested);
+    }
+
+    public void Dispose()
+    {
+        SystemNavigationManager.GetForCurrentView().BackRequested -= this.OnBackRequested;
+    }
+
+    private void OnBackRequested(object sender, BackRequestedEventArgs e)
+    {
+        this.BackRequested?.Invoke(sender, e);
+
+        if (!e.Handled)
+        {
+            Debug.WriteLine("Back handled by navigation service");
+            e.Handled = true;
+            this.GoBack();
+        }
+    }
+
+    private void GoBack()
+    {
+        var rootFrame = Window.Current.Content as Frame;
+
+        if (rootFrame?.CanGoBack == true)
+        {
+            rootFrame.GoBack();
+        }
+    }
+}
+```
 
 Now we can just use it like any other event, and the only thing that will change is the invocation order:
 
-https://gist.github.com/kevingosse/bf583311763c14116df0
+```csharp
+public MainPage()
+{
+    SystemNavigationManager.GetForCurrentView().AppViewBackButtonVisibility = AppViewBackButtonVisibility.Visible;
+
+    this.NavigationService = new NavigationService();
+
+    this.NavigationService.BackRequested += this.OnBackRequested1;
+    this.NavigationService.PreemptiveBackRequested += this.OnBackRequested2;
+    this.InitializeComponent();
+}
+```
